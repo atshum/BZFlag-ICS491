@@ -1,0 +1,9 @@
+ICS 491 - Special Topics: Artificial Intelligence for Games<br>
+University of Hawaii at Manoa, Fall 2011<br>
+----
+=== Assignment 1 ===
+Implemented flocking behavior using a weighted blend of cohesion, separation, and alignment.  Separation is calculated using the center of mass of other tanks within a certain threshold radius (as opposed to using an inverse square law).
+
+=== Installing ===
+# Replace the default BZFlag files with the provided files
+# Build BZFlag as normal
