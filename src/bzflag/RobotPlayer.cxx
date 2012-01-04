@@ -11,9 +11,13 @@
  */
 
 #define SEPARATION_THRESHOLD 3
-#define COHESION_WEIGHT 1
-#define SEPARATION_WEIGHT 2
-#define ALIGNMENT_WEIGHT 2
+#define ALIGNMENT_THRESHOLD 10
+#define COHESION_WEIGHT 2.5
+#define SEPARATION_WEIGHT 3
+#define ALIGNMENT_WEIGHT 1
+#define CTF_WEIGHT 2.5
+
+#include "playing.h"
 
 // interface header
 #include "RobotPlayer.h"
@@ -279,6 +283,10 @@ void RobotPlayer::doUpdateMotion(float dt) {
 */
 
 // ========== MY CODE (begin) ==========
+// ========== Assignment 1    ==========
+    World *world = World::getWorld();
+    TeamColor myTeam = this->getTeam();
+
     float sumCoords[2]       = {0};
     int   numOtherPlayers    = 0;
     float sumCoordsNearby[2] = {0};
@@ -287,21 +295,21 @@ void RobotPlayer::doUpdateMotion(float dt) {
 
     // loop through all the tanks to save some data into the variables above
     Player *p = 0;
-    for (int i=0; i < World::getWorld()->getCurMaxPlayers(); i++) {
+    for (int i=0; i < world->getCurMaxPlayers(); i++) {
       // player 0 is reserved for the user, and getPlayer(0) will always be null
       if (0 == i)
         p = LocalPlayer::getMyTank();
       else
-        p = World::getWorld()->getPlayer(i);
+        p = world->getPlayer(i);
       // if player is exists, is not self, and is on same team
-      if (p && p->getId() != this->getId() && p->getTeam() == this->getTeam()) {
+      if (p && p->getId() != this->getId() && p->getTeam() == myTeam) {
         const float *pos = p->getPosition();
 
         // for Cohesion
         // sum up all the position coordinates, for calculating the center of mass
         sumCoords[0] += pos[0];
         sumCoords[1] += pos[1];
-        numOtherPlayers ++;
+        numOtherPlayers++;
 
         // for Separation
         // sum up the position coordinates of tanks within the separation threshold radius
@@ -312,11 +320,14 @@ void RobotPlayer::doUpdateMotion(float dt) {
           sumCoordsNearby[1] += pos[1];
           numPlayersNearby++;
         }
-
         // for Alignment
-        // sum up the velocity components, for calculating the average velocity
-        sumVelocities[0] += p->getVelocity()[0];
-        sumVelocities[1] += p->getVelocity()[1];
+        // sum up the velocity components of tanks within the alignment threshold radius
+        // for calculating the average velocity
+        else if (distance <= ALIGNMENT_THRESHOLD * BZDBCache::tankRadius) {
+          sumVelocities[0] += p->getVelocity()[0];
+          sumVelocities[1] += p->getVelocity()[1];
+        }
+
       }
     } // for
 
@@ -356,11 +367,60 @@ void RobotPlayer::doUpdateMotion(float dt) {
       alignmentVel[1] = sumVelocities[1] / numOtherPlayers;
     }
 
-    // weighted blending of cohesion, separation, alignment
-    float v[2] = {
-        COHESION_WEIGHT*cohesionVel[0] + SEPARATION_WEIGHT*separationVel[0] + ALIGNMENT_WEIGHT*alignmentVel[0],
-        COHESION_WEIGHT*cohesionVel[1] + SEPARATION_WEIGHT*separationVel[1] + ALIGNMENT_WEIGHT*alignmentVel[1]
-    };
+// ========== Assignment 2 ==========
+
+    // velocity vector for capture the flag (CTF)
+    float ctfVel[2] = {0};
+
+    // if team flags exist (capture the flag mode)
+    if (world->allowTeamFlags()) {
+      std::vector<Flag> enemyFlags = this->identifyEnemyFlags();
+      // if enemy flags exist
+      if (enemyFlags.size()) {
+        // the position target for CTF
+        // either the position of an enemy flag, or the position of our base
+        float ctfPositionTarget[2] = {0};
+
+        // if our team doesn't have an enemy flag, the CTF position target is the position of some enemy flag
+        if (!this->teamHasEnemyFlag()) {
+          // choose closest enemy flag
+          Flag targetFlag = enemyFlags[0];
+          float targetDistance = hypotf(targetFlag.position[0] - position[0], targetFlag.position[1] - position[1]);
+          for (std::vector<Flag>::iterator i = enemyFlags.begin(); i<enemyFlags.end(); i++) {
+            Flag temp = *i;
+            float tempDistance = hypotf(temp.position[0] - position[0], temp.position[1] - position[1]);
+            if (tempDistance < targetDistance) {
+              targetFlag = temp;
+              targetDistance = tempDistance;
+            }
+          } // for
+          ctfPositionTarget[0] = targetFlag.position[0];
+          ctfPositionTarget[1] = targetFlag.position[1];
+        }
+        // we have an enemy flag, so the CTF position target is the position of our base
+        else {
+          const float* basePos = world->getBase(myTeam, 0);
+          ctfPositionTarget[0] = basePos[0];
+          ctfPositionTarget[1] = basePos[1];
+        }
+
+        // calculate velocity vector to the CTF position target
+        float ctfRelativePos[2] = {ctfPositionTarget[0] - position[0], ctfPositionTarget[1] - position[1]};
+        float ctfDistance = hypotf(ctfRelativePos[0], ctfRelativePos[1]);
+        ctfVel[0] = (ctfRelativePos[0] / ctfDistance) * tankSpeed;
+        ctfVel[1] = (ctfRelativePos[1] / ctfDistance) * tankSpeed;
+      } // if enemyFlags.size()
+    } // if world->allowTeamFlags
+    // NOTE: if team flags are allowed, but enemy flags do not exist, then
+    // currently this implementation will not drop flags (but I think that doesn't really matter at this point)
+
+
+    // weighted blending of cohesion, separation, alignment, capture the flag
+    float v[2] = {0};
+    v[0] = COHESION_WEIGHT*cohesionVel[0] + SEPARATION_WEIGHT*separationVel[0] + ALIGNMENT_WEIGHT*alignmentVel[0] +
+           CTF_WEIGHT*ctfVel[0];
+    v[1] = COHESION_WEIGHT*cohesionVel[1] + SEPARATION_WEIGHT*separationVel[1] + ALIGNMENT_WEIGHT*alignmentVel[1] +
+           CTF_WEIGHT*ctfVel[1];
     float distance = hypotf(v[0], v[1]);
 // ========== MY CODE (end) ==========
 
@@ -407,6 +467,56 @@ void RobotPlayer::doUpdateMotion(float dt) {
   } // if (isAlive())
   LocalPlayer::doUpdateMotion(dt);
 }
+
+// ========== MY CODE (begin) ==========
+
+/* Identifies the enemy flags, for convenience.
+ * @return A Vector containing the enemy flags.
+ */
+std::vector<Flag> RobotPlayer::identifyEnemyFlags() {
+  std::vector<Flag> enemyFlags;
+  World *world = World::getWorld();
+  // team flags exist (capture the flag mode)
+  if (world->allowTeamFlags()) {
+    Flag flag;
+    for (int i=0; i<world->getMaxFlags(); i++) {
+      flag = world->getFlag(i);
+      TeamColor flagTeam = flag.type->flagTeam;
+      // if the flag is on some team, but not on our team
+      if (flagTeam != NoTeam && flagTeam != this->getTeam())
+        enemyFlags.push_back(flag);
+    } // for
+  }
+  return enemyFlags;
+}
+
+/* Checks if the current tank's team has an enemy flag.
+ * Also drops non-enemy flags, if possible.
+ * @return True if the current tanks's team has an enemy flag, false otherwise.
+ */
+bool RobotPlayer::teamHasEnemyFlag() {
+  TeamColor myTeam = this->getTeam();
+  World *world = World::getWorld();
+  // team flags exist (capture the flag mode)
+  if (world->allowTeamFlags()) {
+    Player *tank = 0;
+    for (int i=1; i<world->getCurMaxPlayers(); i++) {
+      tank = world->getPlayer(i);
+      // if the tank exists, is on our team, and has a flag
+      if (tank && tank->getTeam() == myTeam && tank->getFlag() != Flags::Null) {
+        FlagType *flagtype = tank->getFlag();
+        TeamColor flagTeam = flagtype->flagTeam;
+        if (flagTeam != myTeam && flagTeam != NoTeam)
+          return true;
+        else if (flagtype->endurance != FlagSticky)
+          serverLink->sendDropFlag(tank->getId(), tank->getPosition());
+      }
+    } // for
+  }
+  return false;
+}
+
+// ========== MY CODE (end) ==========
 
 
 void RobotPlayer::explodeTank() {

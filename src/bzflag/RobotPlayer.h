@@ -60,6 +60,10 @@ class RobotPlayer : public LocalPlayer {
      void		projectPosition(const Player *targ,const float t,float &x,float &y,float &z) const;
      void		getProjectedPosition(const Player *targ, float *projpos) const;
 
+     bool teamHasEnemyFlag();
+     std::vector<Flag> identifyEnemyFlags();
+
+
   private:
     const Player*	target;
     std::vector<RegionPoint>	path;
@@ -67,6 +71,7 @@ class RobotPlayer : public LocalPlayer {
     float		timerForShot;
     bool		drivingForward;
     static std::vector<BzfRegion*>* obstacleList;
+
 };
 
 #endif // BZF_ROBOT_PLAYER_H

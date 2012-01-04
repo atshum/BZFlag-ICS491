@@ -1,9 +1,15 @@
 ICS 491 - Special Topics: Artificial Intelligence for Games<br>
 University of Hawaii at Manoa, Fall 2011<br>
 ----
-=== Assignment 1 ===
-Implemented flocking behavior using a weighted blend of cohesion, separation, and alignment.  Separation is calculated using the center of mass of other tanks within a certain threshold radius (as opposed to using an inverse square law).
+=== Assignment 2 ===
+In Capture the Flag mode, if the team doesn't have an enemy flag, the robot tanks will seek toward the closest enemy flag.  If the team has an enemy flag, the robot tanks will seek toward their home base.  The robot tanks still move in a flock.  The robot tanks will immediately drop all other flags, if possible.  Does not handle obstacles.
 
 === Installing ===
 # Replace the default BZFlag files with the provided files
 # Build BZFlag as normal
+
+=== Running ===
+* <code>$BZFS_BIN</code> - the path to the BZFlag server executable
+* <code>$BZFLAG_BIN</code> - the path to the BZFlag client executable
+# <code>$BZFS_BIN/bzfs -cr -density 0 -mp 0,5,5,0,0,1</code>
+# <code>$BZFLAG_BIN/bzflag -solo 10</code>
