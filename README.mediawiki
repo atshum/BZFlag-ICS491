@@ -1,15 +1,20 @@
 ICS 491 - Special Topics: Artificial Intelligence for Games<br>
 University of Hawaii at Manoa, Fall 2011<br>
 ----
-=== Assignment 2 ===
-In Capture the Flag mode, if the team doesn't have an enemy flag, the robot tanks will seek toward the closest enemy flag.  If the team has an enemy flag, the robot tanks will seek toward their home base.  The robot tanks still move in a flock.  The robot tanks will immediately drop all other flags, if possible.  Does not handle obstacles.
+
+
+=== Assignment 3 ===
+If enemy flags exist, the robot tank finds a path to an enemy flag using A-star search.  If enemy flags don't exist, the robot tank finds a path to the local player's tank using A-star search.  Implements A-star search using the [http://code.google.com/p/yagsbpl/ YAGSBPL] template-based library.
 
 === Installing ===
-# Replace the default BZFlag files with the provided files
+# Download the BZFlag 2.4.0 source (not the installer/binary)
+# Extract the source files into a directory (<code>$BZFLAG_HOME</code>)
+# Place the provided files in the corresponding directories within <code>$BZFLAG_HOME</code>, replacing some existing files
 # Build BZFlag as normal
 
 === Running ===
 * <code>$BZFS_BIN</code> - the path to the BZFlag server executable
 * <code>$BZFLAG_BIN</code> - the path to the BZFlag client executable
-# <code>$BZFS_BIN/bzfs -cr -density 0 -mp 0,5,5,0,0,1</code>
-# <code>$BZFLAG_BIN/bzflag -solo 10</code>
+# <code>$BZFS_BIN/bzfs -cr</code>
+# <code>$BZFLAG_BIN/bzflag -solo 1</code>
+
