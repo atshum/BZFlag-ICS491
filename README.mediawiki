@@ -3,18 +3,24 @@ University of Hawaii at Manoa, Fall 2011<br>
 ----
 
 
-=== Assignment 3 ===
-If enemy flags exist, the robot tank finds a path to an enemy flag using A-star search.  If enemy flags don't exist, the robot tank finds a path to the local player's tank using A-star search.  Implements A-star search using the [http://code.google.com/p/yagsbpl/ YAGSBPL] template-based library.
+=== Assignment 4 ===
+Robot tanks on the same team all use the same team path.  The team path is found using A-star search from the team's center of mass (or a nearby accessible node) to an enemy flag or the team's home base.  The team path is not recalculated unless the destination changes.  Each robot tank will check the line-of-sight to the next node in the path and, if necessary, use A-star search to find a personal path to the next node.  Path-smoothing is performed to reduce the jaggedness of the paths, which arises since the game level is represented as a tile graph.  Blends in a separation so that robot tanks don't end up superimposed on one another.
+
+Uses the [http://code.google.com/p/yagsbpl/ YAGSBPL] library to implement A-star search.
+
+Note:
+If you are not playing as an observer, then during the first few run loops, some of the tanks will be uninitialized(?) and have coordinates (0,0) as their position, which skews the center of mass calculation.  This is why you might see the tanks move toward the center of map before seeking the enemy flag.
+
 
 === Installing ===
 # Download the BZFlag 2.4.0 source (not the installer/binary)
 # Extract the source files into a directory (<code>$BZFLAG_HOME</code>)
-# Place the provided files in the corresponding directories within <code>$BZFLAG_HOME</code>, replacing some existing files
+# Place the provided files in the corresponding directories within <code>$BZFLAG_HOME</code>, replacing some of the existing files
 # Build BZFlag as normal
 
 === Running ===
 * <code>$BZFS_BIN</code> - the path to the BZFlag server executable
 * <code>$BZFLAG_BIN</code> - the path to the BZFlag client executable
 # <code>$BZFS_BIN/bzfs -cr</code>
-# <code>$BZFLAG_BIN/bzflag -solo 1</code>
+# <code>$BZFLAG_BIN/bzflag -solo 9</code>
 

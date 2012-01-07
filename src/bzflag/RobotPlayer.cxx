@@ -10,16 +10,6 @@
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-// for ServerLink and Control Panel
-#include "playing.h"
-// constants for flocking
-#define SEPARATION_THRESHOLD 3
-#define ALIGNMENT_THRESHOLD 10
-#define COHESION_WEIGHT 2.5
-#define SEPARATION_WEIGHT 3
-#define ALIGNMENT_WEIGHT 1
-#define CTF_WEIGHT 2.5
-
 // interface header
 #include "RobotPlayer.h"
 
@@ -31,7 +21,36 @@
 #include "Intersect.h"
 #include "TargetingUtils.h"
 
+// ========== MY CODE (begin) ==========
+/* For the run loop's first few calls to RobotPlayer::setTarget(),
+ * if the user is on a team (not an observer), then
+ * the position of some tanks is (0,0), which messes up the center of mass calculation.
+ * Use this to skip the first few calls of RobotPlayer::setTarget() and RobotPlayer::doUpdateMotion()
+ */
+//#define SKIP_LOOPS 5
+int RobotPlayer::loops = 0;
+
+// for ServerLink and Control Panel
+#include "playing.h"
+
+// constants for flocking
+#define SEPARATION_THRESHOLD (3 * BZDBCache::tankRadius)
+#define ALIGNMENT_THRESHOLD 10
+#define COHESION_WEIGHT 2.5
+#define SEPARATION_WEIGHT 3
+#define ALIGNMENT_WEIGHT 1
+#define PATH_WEIGHT 7
+
+// hash function: 2x + 3y
+#define MAX_HASH_VAL (int)(5 * 0.5f * BZDBCache::worldSize)
+// using a const float for MAX_HASH_VAL didn't work
+
+std::vector<MyNode> RobotPlayer::teamPaths[CtfTeams];
+MyNode RobotPlayer::teamGoal[CtfTeams];
+// ========== MY CODE (end) ==========
+
 std::vector<BzfRegion*>* RobotPlayer::obstacleList = NULL;
+
 
 RobotPlayer::RobotPlayer(const PlayerId& _id, const char* _name, ServerLink* _server,
     const char* _motto = "") :
@@ -123,6 +142,13 @@ void RobotPlayer::getProjectedPosition(const Player *targ, float *projpos) const
 void RobotPlayer::doUpdate(float dt) {
   LocalPlayer::doUpdate(dt);
 
+// ========== MY CODE (begin) ==========
+  this->dropFlag();
+  if (!target) {
+    return;
+  }
+// ========== MY CODE (end) ==========
+
   float tankRadius = BZDBCache::tankRadius;
   const float shotRange = BZDB.eval(StateDatabase::BZDB_SHOTRANGE);
   const float shotRadius = BZDB.eval(StateDatabase::BZDB_SHOTRADIUS);
@@ -131,11 +157,6 @@ void RobotPlayer::doUpdate(float dt) {
   timerForShot -= dt;
   if (timerForShot < 0.0f)
     timerForShot = 0.0f;
-
-  // MODIFIED
-  if (!target) {
-    return;
-  }
 
   if (getFiringStatus() != Ready)
     return;
@@ -504,18 +525,35 @@ void RobotPlayer::findPath(RegionPriorityQueue& queue, BzfRegion* region, BzfReg
 // ========== MY CODE BELOW ==========
 
 void RobotPlayer::doUpdateMotion(float dt) {
+
+#ifdef SKIP_LOOPS
+  if (RobotPlayer::loops < SKIP_LOOPS) {
+    return;
+  }
+#endif
+
+// TESTING <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+//  Player *p = LocalPlayer::getMyTank();
+//  MyNode mooNode(p->getPosition());
+//  if (mooNode.x != 0 && mooNode.y != 0) {
+//    char buffer[128];
+//    sprintf(buffer, "driver: %d, %d", mooNode.x, mooNode.y);
+//    controlPanel->addMessage(buffer);
+//  }
+
   if (isAlive()) {
     bool evading = false;
     // record previous position
-    const float oldAzimuth = getAngle();
     const float* oldPosition = getPosition();
     float position[3];
     position[0] = oldPosition[0];
     position[1] = oldPosition[1];
     position[2] = oldPosition[2];
+    const float oldAzimuth = getAngle();
     float azimuth = oldAzimuth;
     float tankAngVel = BZDB.eval(StateDatabase::BZDB_TANKANGVEL);
     float tankSpeed = BZDBCache::tankSpeed;
+    float tankRadius = BZDBCache::tankRadius;
 
     // basically a clone of Roger's evasive code
     for (int t = 0; t <= World::getWorld()->getCurMaxPlayers(); t++) {
@@ -577,18 +615,421 @@ void RobotPlayer::doUpdateMotion(float dt) {
 
     // when we are not evading, follow the path
     if (!evading && dt > 0.0 && pathIndex < (int) path.size()) {
-      float distance;
-      float v[2];
-      const float* endPoint = path[pathIndex].get();
+
+      this->checkLineOfSight();
 
       // find how long it will take to get to next path segment
-      v[0] = endPoint[0] - position[0];
-      v[1] = endPoint[1] - position[1];
-      distance = hypotf(v[0], v[1]);
-      float tankRadius = BZDBCache::tankRadius;
+      const float* nextPoint = path[pathIndex].get();
+      float relPosToNextNode[2] = {nextPoint[0] - position[0], nextPoint[1] - position[1]};
+      float distanceToNextNode = hypotf(relPosToNextNode[0], relPosToNextNode[1]);
       // smooth path a little by turning early at corners, might get us stuck, though
-      if (distance <= 2.5f * tankRadius)
-        pathIndex++;
+      //if (distance <= 2.5f * tankRadius)
+      if (distanceToNextNode <= dt * tankSpeed + tankRadius) {
+          pathIndex++;
+      }
+
+      float separationV[3] = {0};
+      this->getSeparation(separationV);
+
+      //float distance;
+      // v is a relative position, according to the original implementation
+      float v[2];
+      v[0] = PATH_WEIGHT * relPosToNextNode[0] + SEPARATION_WEIGHT * separationV[0];
+      v[1] = PATH_WEIGHT * relPosToNextNode[1] + SEPARATION_WEIGHT * separationV[1];
+      // normalize v
+      // QUESTION: is there a point to normalizing v?
+      int weight = PATH_WEIGHT + SEPARATION_WEIGHT;
+      v[0] /= weight;
+      v[1] /= weight;
+
+      float segmentAzimuth = atan2f(v[1], v[0]);
+      float azimuthDiff = segmentAzimuth - azimuth;
+      if (azimuthDiff > M_PI)
+        azimuthDiff -= (float) (2.0 * M_PI);
+      else if (azimuthDiff < -M_PI)
+        azimuthDiff += (float) (2.0 * M_PI);
+      if (fabs(azimuthDiff) > 0.01f) {
+        // drive backward when target is behind, try to stick to last direction
+        if (drivingForward)
+          drivingForward = fabs(azimuthDiff) < M_PI / 2 * 0.9 ? true : false;
+        else
+          drivingForward = fabs(azimuthDiff) < M_PI / 2 * 0.3 ? true : false;
+        setDesiredSpeed(drivingForward ? 1.0f : -1.0f);
+        // set desired turn speed
+        if (azimuthDiff >= dt * tankAngVel) {
+          setDesiredAngVel(1.0f);
+        }
+        else if (azimuthDiff <= -dt * tankAngVel) {
+          setDesiredAngVel(-1.0f);
+        }
+        else {
+          setDesiredAngVel(azimuthDiff / dt / tankAngVel);
+        }
+      }
+      else {
+        drivingForward = true;
+// QUESTION: do I need this?
+//        setDesiredSpeed(1.0f);
+        // tank doesn't turn while moving forward
+        setDesiredAngVel(0.0f);
+      }
+// TESTING ---------------------------------------------------------------------
+//setDesiredSpeed(0.0f);
+//setDesiredAngVel(0.0f);
+    } // if (!evading...)
+    // to prevent overshooting the target
+    else if (!evading && dt > 0.0 && pathIndex >= (int) path.size()) {
+      pathIndex = (int) (path.size() - 1);
+    }
+  } // if (isAlive())
+  LocalPlayer::doUpdateMotion(dt);
+}
+
+
+void RobotPlayer::setTarget(const Player* _target) {
+  target = _target;
+
+#ifdef SKIP_LOOPS
+  if (RobotPlayer::loops < SKIP_LOOPS) {
+    RobotPlayer::loops++;
+    return;
+  }
+#endif
+
+  TeamColor myTeam = this->getTeam();
+
+  this->setTeamGoalNode();
+
+  // if team doesn't have a path yet, or
+  // if the path doesn't lead to the team goal (maybe the goal moved)
+  // then set the team path
+  if (teamPaths[myTeam].empty() || !(teamPaths[myTeam].back() == teamGoal[myTeam])) {
+    MyNode startNode = this->getTeamStartNode();
+    this->setPath(teamPaths[myTeam], startNode, teamGoal[myTeam]);
+  }
+
+  // if tank doesn't have a path yet, or
+  // if tank's path doesn't lead to team goal (maybe team goal changed)
+  if (path.empty() || !(myGoal == teamGoal[myTeam])) {
+    path.clear();
+    pathIndex = 0;
+    // copy the team path into tank's path, and set tank's goal to be team goal
+    for (int i=0; i<teamPaths[myTeam].size(); i++) {
+      MyNode node = teamPaths[myTeam][i];
+      RegionPoint rp(convertToGameCoord(node.x), convertToGameCoord(node.y));
+      path.push_back(rp);
+    }
+    myGoal = teamGoal[myTeam];
+  }
+}
+
+
+/* Sets the team's goal node. The A* search will try to find a path to this node.
+ * If enemy flags exist and our team doesn't have an enemy flag,
+ * then the goal will be the location of one of the enemy flags.
+ * Otherwise, the goal will be the location of the team's base
+ * WARNING: if the goal node is inaccessible (e.g., not capture-the-flag mode, user is an observer,
+ *   or user is within an obstacle), then the game will crash!  This is easily fixed.
+ */
+void RobotPlayer::setTeamGoalNode() {
+  TeamColor myTeam = this->getTeam();
+  std::vector<Flag> enemyFlags = this->getAllEnemyFlags();
+  if (enemyFlags.size() && !this->teamHasEnemyFlag()) {
+    Flag someFlag = enemyFlags[0];
+    MyNode tempNode(someFlag.position[0], someFlag.position[1]);
+    teamGoal[myTeam] = tempNode;
+  }
+  else {
+    const float* basePos = World::getWorld()->getBase(myTeam, 0);
+    MyNode tempNode(basePos[0], basePos[1]);
+    teamGoal[myTeam] = tempNode;
+  }
+}
+
+
+/* Gets the team's start node. The A* search will start searching for a path from this node.
+ * The start node will be the location of the team's center of mass.
+ * If this node is inaccessible, it will try to look for a nearby node that is accessible.
+ * If no such node can be found, the start node will be
+ * the location of the first tank to call this method.
+ * @return The node from which to start the A* search.
+ */
+MyNode RobotPlayer::getTeamStartNode() {
+  float centerOfMass[3];
+  this->getCenterOfMass(centerOfMass);
+  MyNode comNode(centerOfMass[0], centerOfMass[1]);
+  if (MyNode::getNearbyAccessibleNodeCoords(comNode.x, comNode.y, 4)) {
+    return comNode;
+  }
+  const float *firstTankPos = this->getPosition();
+  MyNode firstTankNode(firstTankPos[0], firstTankPos[1]);
+  return firstTankNode;
+}
+
+
+
+/* Uses A* search to find a path from the start node to the goal node.  ALSO smooths the path.
+ * WARNING: will crash if the goal (or start?) node is inaccessible.
+ * @param myPath Writes the path to this vector of nodes.
+ * @param start The node from which to start the A* search.
+ * @param goal The A* search will try to find a path to this node.
+ */
+void RobotPlayer::setPath(std::vector<MyNode> &myPath, MyNode start, MyNode goal) {
+  // set up the graph function container
+  int xmin = (int)(-0.5f * BZDBCache::worldSize);
+  int ymin = (int)(-0.5f * BZDBCache::worldSize);
+  int xmax = (int)(0.5f * BZDBCache::worldSize);
+  int ymax = (int)(0.5f * BZDBCache::worldSize);
+  GraphFunctionContainer container(xmin, ymin, xmax, ymax);
+
+  // create the graph
+  GenericSearchGraphDescriptor<MyNode, double> graph;
+  graph.func_container = &container;
+  graph.hashTableSize = MAX_HASH_VAL + 1;
+  graph.SeedNode = start;
+  graph.TargetNode = goal;
+
+  // find the path
+  A_star_planner<MyNode,double> planner;
+  planner.init(graph);
+  planner.plan();
+  std::vector< std::vector<MyNode> > paths = planner.getPlannedPaths();
+
+  // reverse paths[0]
+  // paths[0] contains the path, but backwards
+  //   paths[0][0]       == goal node
+  //   paths[0].size()-1 == start node
+  //   paths[0].size()-2 == first node to go to
+  myPath.clear();
+  for (int i=paths[0].size()-1; i >=0; i--) {
+    myPath.push_back(paths[0][i]);
+  }
+  // smooth the path
+  myPath = this->getSmoothPath(myPath);
+}
+
+
+/* If an earlier node and a later node in the input path have a clear line of sight, then store
+ * these nodes (and skip the nodes in-between) in the output path as the smoothed path.
+ * @param inputPath The path to smooth.
+ * @return The smoothed path.
+ */
+std::vector<MyNode> RobotPlayer::getSmoothPath(std::vector<MyNode> inputPath) {
+  if (inputPath.size() <= 2) {
+    // nothing to do
+    return inputPath;
+  }
+
+  std::vector<MyNode> outputPath;
+  outputPath.push_back(inputPath[0]);
+  // start at 2 b/c there is already a connection btwn 0 and 1
+  // stop at size-1 b/c last node must be added anyway, so no need to check
+  for (int i=2; i<inputPath.size()-1; i++) {
+    MyNode fromNode = outputPath[outputPath.size()-1];
+    MyNode toNode = inputPath[i];
+    float fromPos[2] = {convertToGameCoord(fromNode.x), convertToGameCoord(fromNode.y)};
+    float toPos[2]   = {convertToGameCoord(toNode.x),   convertToGameCoord(toNode.y)};
+    if (this->obstructedLineOfSight(fromPos, toPos)) {
+      outputPath.push_back(inputPath[i-1]);
+    }
+  }
+  outputPath.push_back(inputPath[inputPath.size()-1]);
+  return outputPath;
+}
+
+
+
+/* Checks the line of sight between the given positions to see if any obstacles are in the way.
+ * @param fromPos2D The position that we are checking the line-of-sight from.
+ * @param toPos2D The position that we are looking toward.
+ * @return True if the line of sight is obstructed, false otherwise
+ */
+bool RobotPlayer::obstructedLineOfSight(const float *fromPos2D, const float *toPos2D) {
+  float fromPos[3] = {fromPos2D[0], fromPos2D[1], 0.0f};
+  float toPos[3]   = {toPos2D[0],   toPos2D[1],   0.0f};
+
+  float dist = hypotf(toPos[0]-fromPos[0], toPos[1]-fromPos[1]);
+  float direction[3] = {(toPos[0]-fromPos[0])/dist, (toPos[1]-fromPos[1])/dist, 0.0f};
+  Ray myRay(fromPos, direction);
+
+  return (ShotStrategy::getFirstBuilding(myRay, 0.0f, dist) != NULL);
+}
+
+
+
+/* If the line of sight from the tank's current position to the next node is blocked,
+ * then use A* search to find a path to the next node, and insert it into the tank's path
+ */
+void RobotPlayer::checkLineOfSight() {
+  if (path.empty()) {
+    return;
+  }
+
+  const float *fromPos = this->getPosition();
+  const float *toPos   = path[pathIndex].get();
+  if (this->obstructedLineOfSight(fromPos, toPos)) {
+    std::vector<MyNode> prePath;
+    MyNode fromNode(fromPos[0], fromPos[1]);
+    MyNode toNode  (toPos[0],   toPos[1]);
+
+    this->setPath(prePath, fromNode, toNode);
+    if (prePath.size() > 2) {
+      // don't insert the first node because it is the tank's current position
+      // don't insert the last  node because it is already in the path
+      for (int i=prePath.size()-2; i>0; i--) {
+        MyNode node = prePath[i];
+        RegionPoint rp(convertToGameCoord(node.x), convertToGameCoord(node.y));
+        path.insert(path.begin(), rp);
+      }
+    }  // if prePath.size > 2
+  }  // if obstructedLineOfSight
+}
+
+
+/* Calculates the location of the center of mass for this tank's team.
+ * @param centerOfMass Writes the location of the center of mass to this array.
+ */
+void RobotPlayer::getCenterOfMass(float centerOfMass[3]) {
+  World *world = World::getWorld();
+  const float *position = this->getPosition();
+
+  float sumCoords[3] = {position[0], position[1], 0.0f};
+  int teamSize       = 1;
+
+  Player *p = 0;
+  for (int i=0; i < world->getCurMaxPlayers(); i++) {
+    // player 0 is reserved for the user, and getPlayer(0) will always be null
+    if (0 == i)
+      p = LocalPlayer::getMyTank();
+    else
+      p = world->getPlayer(i);
+    // if player is exists, is not self, and is on same team
+    if (p && p->getId() != this->getId() && p->getTeam() == this->getTeam()) {
+      const float *pos = p->getPosition();
+      sumCoords[0] += pos[0];
+      sumCoords[1] += pos[1];
+      teamSize++;
+    }
+  }  // for
+
+  centerOfMass[0] = sumCoords[0]/teamSize;
+  centerOfMass[1] = sumCoords[1]/teamSize;
+  centerOfMass[2] = 0.0f;
+
+//  float relativePosCOM[2] = {centerOfMass[0] - position[0], centerOfMass[1] - position[1]};
+//  float distanceCOM = hypotf(relativePosCOM[0], relativePosCOM[1]);
+}
+
+
+
+
+/* Identifies all enemy flags, and stores them into a vector.
+ * @return A vector containing the enemy flags.
+ */
+std::vector<Flag> RobotPlayer::getAllEnemyFlags() {
+  std::vector<Flag> enemyFlags;
+  World *world = World::getWorld();
+  // team flags exist (capture the flag mode)
+  if (world->allowTeamFlags()) {
+    for (int i=0; i<world->getMaxFlags(); i++) {
+      Flag flag = world->getFlag(i);
+      TeamColor flagTeam = flag.type->flagTeam;
+      // if the flag is on some team, but not on our team
+      if (flagTeam != NoTeam && flagTeam != this->getTeam())
+        enemyFlags.push_back(flag);
+    } // for
+  }
+  return enemyFlags;
+}
+
+
+/* Checks if this tank's team has an enemy flag.
+ * @return True if this tanks's team has an enemy flag, false otherwise.
+ */
+bool RobotPlayer::teamHasEnemyFlag() {
+  TeamColor myTeam = this->getTeam();
+  World *world = World::getWorld();
+  Player *tank = 0;
+  // team flags exist (capture the flag mode)
+  if (world->allowTeamFlags()) {
+    for (int i=1; i<world->getCurMaxPlayers(); i++) {
+      tank = world->getPlayer(i);
+      // if the tank exists, is on our team, and has a flag
+      if (tank && tank->getTeam() == myTeam && tank->getFlag() != Flags::Null) {
+        TeamColor flagTeam = tank->getFlag()->flagTeam;
+        if (flagTeam != myTeam && flagTeam != NoTeam)
+          return true;
+      }
+    } // for
+  }
+  return false;
+}
+
+
+/* If able, drops any flag that is not an enemy flag.
+ */
+void RobotPlayer::dropFlag() {
+  World *world = World::getWorld();
+
+  FlagType *myFlag = this->getFlag();
+  if (myFlag &&
+      (myFlag != Flags::Null) &&
+      (myFlag->flagTeam == this->getTeam() || myFlag->flagTeam == NoTeam) &&
+      myFlag->endurance != FlagSticky
+      ) {
+    serverLink->sendDropFlag(this->getId(), this->getPosition());
+  }
+}
+
+
+/* Calculates the separation vector.
+ * @param separationVel Writes the separation vector to this array.
+ */
+void RobotPlayer::getSeparation(float separationV[3]) {
+  separationV[0] = separationV[1] = separationV[2] = 0.0f;
+  float sumCoordsNearby[2] = {0};
+  int   numPlayersNearby   = 0;
+
+  World *world = World::getWorld();
+  const float *myPos = this->getPosition();
+  Player *p = 0;
+
+  // sum up the coordinates of tanks within the separation threshold radius
+  // excludes self
+  for (int i=0; i < world->getCurMaxPlayers(); i++) {
+    // player 0 is reserved for the user, and getPlayer(0) will always be null
+    if (0 == i)
+      p = LocalPlayer::getMyTank();
+    else
+      p = world->getPlayer(i);
+    // if player is exists, is not self, and is on same team
+    if (p && p->getId() != this->getId() && p->getTeam() == this->getTeam()) {
+      const float *pos = p->getPosition();
+      float distance = hypotf(pos[0] - myPos[0], pos[1] - myPos[1]);
+      if (distance <= SEPARATION_THRESHOLD) {
+        sumCoordsNearby[0] += pos[0];
+        sumCoordsNearby[1] += pos[1];
+        numPlayersNearby++;
+      }
+    } // if
+  } // for
+
+  // calculate the center of mass of tanks within the threshold radius, excluding self
+  // calculate the vector away from this local center of mass
+  if (numPlayersNearby) {
+    float nearbyCOM[2] = {sumCoordsNearby[0]/numPlayersNearby, sumCoordsNearby[1]/numPlayersNearby};
+    // position - center of mass, because we want to move AWAY from this local center of mass
+    float relativePosNearbyCOM[2] = {myPos[0] - nearbyCOM[0], myPos[1] - nearbyCOM[1]};
+    separationV[0] = relativePosNearbyCOM[0];
+    separationV[1] = relativePosNearbyCOM[1];
+
+    // velocity vector = unit direction vector * speed
+    //float distanceNearbyCOM = hypotf(relativePosNearbyCOM[0], relativePosNearbyCOM[1]);
+    //separationV[0] = (relativePosNearbyCOM[0] / distanceNearbyCOM) * BZDBCache::tankSpeed;
+    //separationV[1] = (relativePosNearbyCOM[1] / distanceNearbyCOM) * BZDBCache::tankSpeed;
+  }
+}
+
 /*
 // ========== Assignment 1    ==========
     World *world = World::getWorld();
@@ -731,165 +1172,8 @@ void RobotPlayer::doUpdateMotion(float dt) {
     float distance = hypotf(v[0], v[1]);
 */
 
-      float segmentAzimuth = atan2f(v[1], v[0]);
-      float azimuthDiff = segmentAzimuth - azimuth;
-      if (azimuthDiff > M_PI)
-        azimuthDiff -= (float) (2.0 * M_PI);
-      else if (azimuthDiff < -M_PI)
-        azimuthDiff += (float) (2.0 * M_PI);
-      if (fabs(azimuthDiff) > 0.01f) {
-        // drive backward when target is behind, try to stick to last direction
-        if (drivingForward)
-          drivingForward = fabs(azimuthDiff) < M_PI / 2 * 0.9 ? true : false;
-        else
-          drivingForward = fabs(azimuthDiff) < M_PI / 2 * 0.3 ? true : false;
-        setDesiredSpeed(drivingForward ? 1.0f : -1.0f);
-        // set desired turn speed
-        if (azimuthDiff >= dt * tankAngVel) {
-          setDesiredAngVel(1.0f);
-        }
-        else if (azimuthDiff <= -dt * tankAngVel) {
-          setDesiredAngVel(-1.0f);
-        }
-        else {
-          setDesiredAngVel(azimuthDiff / dt / tankAngVel);
-        }
-      }
-      else {
-        drivingForward = true;
-        // tank doesn't turn while moving forward
-        setDesiredAngVel(0.0f);
-        // find how long it will take to get to next path segment
-        if (distance <= dt * tankSpeed) {
-          pathIndex++;
-          // set desired speed
-          setDesiredSpeed(distance / dt / tankSpeed);
-        }
-        else {
-          setDesiredSpeed(1.0f);
-        }
-      }
-    } // if (!evading...)
-    // to prevent overshooting the target
-    else if (!evading && dt > 0.0 && pathIndex >= (int) path.size()) {
-      pathIndex = (int) (path.size() - 1);
-    }
-
-  } // if (isAlive())
-  LocalPlayer::doUpdateMotion(dt);
-}
 
 
-void RobotPlayer::setTarget(const Player* _target) {
-  target = _target;
-
-  // create start node == this tank's position
-  const float *position = getPosition();
-  MyNode startNode(position[0], position[1]);
-
-  // create end node
-  // WARNING: may crash if end node is inaccessible!!
-  MyNode endNode;
-  std::vector<Flag> enemyFlags = this->identifyEnemyFlags();
-  if (enemyFlags.size()) {
-    Flag someFlag = enemyFlags[0];
-    MyNode tempNode(someFlag.position[0], someFlag.position[1]);
-    endNode = tempNode;
-  }
-  else {
-    Player *p = LocalPlayer::getMyTank();
-    const float *userPos = p->getPosition();
-    MyNode tempNode(userPos[0], userPos[1]);
-    endNode = tempNode;
-  }
-
-  // if the target node hasn't changed, don't run the algorithm again
-  if (targetNode == endNode) {
-    return;
-  }
-  targetNode = endNode;
-
-  // set up the graph function container
-  int xmin = (int) (-0.5 * BZDBCache::worldSize);
-  int ymin = (int) (-0.5 * BZDBCache::worldSize);
-  int xmax = (int) (0.5 * BZDBCache::worldSize);
-  int ymax = (int) (0.5 * BZDBCache::worldSize);
-  GraphFunctionContainer container(xmin, ymin, xmax, ymax);
-
-  // create the graph
-  GenericSearchGraphDescriptor<MyNode, double> graph;
-  graph.func_container = &container;
-  graph.hashTableSize = 2001;  // max hash function value = 2000;
-  graph.SeedNode = startNode;
-  graph.TargetNode = endNode;
-
-  // find the path
-  A_star_planner<MyNode,double> planner;
-  planner.init(graph);
-  planner.plan();
-  std::vector< std::vector<MyNode> > paths = planner.getPlannedPaths();
-
-  // add the path to the 'path' instance variable
-  // paths is backwards:
-  //   paths[0][0]       == goal node
-  //   paths[0].size()-1 == start node
-  //   paths[0].size()-2 == first node to go to
-  path.clear();
-  for (int i=paths[0].size()-2; i >=0; i--) {
-    MyNode nextNode = paths[0][i];
-    RegionPoint nextPoint(convertToGameCoord(nextNode.x), convertToGameCoord(nextNode.y));
-    path.push_back(nextPoint);
-  }
-  pathIndex = 0;
-
-}
-
-
-/* Identifies the enemy flags, for convenience.
- * @return A Vector containing the enemy flags.
- */
-std::vector<Flag> RobotPlayer::identifyEnemyFlags() {
-  std::vector<Flag> enemyFlags;
-  World *world = World::getWorld();
-  // team flags exist (capture the flag mode)
-  if (world->allowTeamFlags()) {
-    Flag flag;
-    for (int i=0; i<world->getMaxFlags(); i++) {
-      flag = world->getFlag(i);
-      TeamColor flagTeam = flag.type->flagTeam;
-      // if the flag is on some team, but not on our team
-      if (flagTeam != NoTeam && flagTeam != this->getTeam())
-        enemyFlags.push_back(flag);
-    } // for
-  }
-  return enemyFlags;
-}
-
-/* Checks if the current tank's team has an enemy flag.
- * Also drops non-enemy flags, if possible.
- * @return True if the current tanks's team has an enemy flag, false otherwise.
- */
-bool RobotPlayer::teamHasEnemyFlag() {
-  TeamColor myTeam = this->getTeam();
-  World *world = World::getWorld();
-  // team flags exist (capture the flag mode)
-  if (world->allowTeamFlags()) {
-    Player *tank = 0;
-    for (int i=1; i<world->getCurMaxPlayers(); i++) {
-      tank = world->getPlayer(i);
-      // if the tank exists, is on our team, and has a flag
-      if (tank && tank->getTeam() == myTeam && tank->getFlag() != Flags::Null) {
-        FlagType *flagtype = tank->getFlag();
-        TeamColor flagTeam = flagtype->flagTeam;
-        if (flagTeam != myTeam && flagTeam != NoTeam)
-          return true;
-        else if (flagtype->endurance != FlagSticky)
-          serverLink->sendDropFlag(tank->getId(), tank->getPosition());
-      }
-    } // for
-  }
-  return false;
-}
 
 // Local Variables: ***
 // mode:C++ ***

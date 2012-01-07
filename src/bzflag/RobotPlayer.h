@@ -21,6 +21,7 @@
 #include "yagsbpl/GraphFunctionContainerUnified.h"
 #include "yagsbpl/A_star.h"
 
+
 #include "common.h"
 
 /* system interface headers */
@@ -57,9 +58,35 @@ private:
   void projectPosition(const Player *targ, const float t, float &x, float &y, float &z) const;
   void getProjectedPosition(const Player *targ, float *projpos) const;
 
+// ========== MY CODE (begin) ==========
+  static int loops;
+
+  static std::vector<MyNode> teamPaths[CtfTeams];
+  static MyNode teamGoal[CtfTeams];
+  MyNode myGoal;
+
+  void setTeamGoalNode();
+  MyNode getTeamStartNode();
+
+  void setPath(std::vector<MyNode> &myPath, MyNode start, MyNode goal);
+  std::vector<MyNode> getSmoothPath(std::vector<MyNode> inputPath);
+
+  bool obstructedLineOfSight(const float *fromPos, const float *toPos);
+  void checkLineOfSight();
+
+  void getCenterOfMass(float centerOfMass[2]);
+  void checkCenterOfMass(float centerOfMass[2]);
+
   bool teamHasEnemyFlag();
-  std::vector<Flag> identifyEnemyFlags();
-  MyNode targetNode;  // QUESTION: do I need to modify the RobotPlayer constructor?
+  std::vector<Flag> getAllEnemyFlags();
+  void dropFlag();
+
+  void getSeparation(float v[3]);
+
+
+// ========== MY CODE (end) ==========
+
+
 
 private:
   const Player* target;
