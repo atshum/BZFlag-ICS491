@@ -177,7 +177,9 @@ bzflag_SOURCES =			\
 	sound.cxx			\
 	sound.h				\
 	stars.cxx			\
-	stars.h
+	stars.h				\
+	decisiontree/dectree.h		\
+	decisiontree/dectree.cxx
 
 
 if BUILD_GLEW
