@@ -33,6 +33,9 @@ int RobotPlayer::loops = 0;
 // for ServerLink and Control Panel
 #include "playing.h"
 
+// for decision tree
+#include "decisiontree/dectree.h"
+
 // constants for flocking
 #define SEPARATION_THRESHOLD (3 * BZDBCache::tankRadius)
 #define ALIGNMENT_THRESHOLD 10
@@ -139,15 +142,9 @@ void RobotPlayer::getProjectedPosition(const Player *targ, float *projpos) const
   }
 }
 
+/* ========== ORIGINAL doUpdate ==========
 void RobotPlayer::doUpdate(float dt) {
   LocalPlayer::doUpdate(dt);
-
-// ========== MY CODE (begin) ==========
-  this->dropFlag();
-  if (!target) {
-    return;
-  }
-// ========== MY CODE (end) ==========
 
   float tankRadius = BZDBCache::tankRadius;
   const float shotRange = BZDB.eval(StateDatabase::BZDB_SHOTRANGE);
@@ -172,11 +169,9 @@ void RobotPlayer::doUpdate(float dt) {
     if (shootingAngle < 0.0f)
       shootingAngle += (float) (2.0 * M_PI);
     float azimuthDiff = shootingAngle - azimuth;
-    if (azimuthDiff > M_PI
-      )
+    if (azimuthDiff > M_PI)
       azimuthDiff -= (float) (2.0 * M_PI);
-    else if (azimuthDiff < -M_PI
-      )
+    else if (azimuthDiff < -M_PI)
       azimuthDiff += (float) (2.0 * M_PI);
 
     const float targetdistance = hypotf(p1[0] - p2[0], p1[1] - p2[1])
@@ -192,7 +187,6 @@ void RobotPlayer::doUpdate(float dt) {
       float maxdistance = targetdistance;
       if (!ShotStrategy::getFirstBuilding(tankRay, -0.5f, maxdistance)) {
         shoot = true;
-        shoot = false;  // MODIFIED
         // try to not aim at teammates
         for (int i = 0; i <= World::getWorld()->getCurMaxPlayers(); i++) {
           Player *p = 0;
@@ -220,6 +214,7 @@ void RobotPlayer::doUpdate(float dt) {
     }
   }
 }
+*/
 
 /* ========== ORIGINAL doUpdateMotion ==========
 void RobotPlayer::doUpdateMotion(float dt) {
@@ -394,6 +389,7 @@ float RobotPlayer::getTargetPriority(const Player* _target) const {
 
 void RobotPlayer::setObstacleList(std::vector<BzfRegion*>* _obstacleList) {
   obstacleList = _obstacleList;
+  aicore::DecisionTrees::init();  // MY CODE
 }
 
 const Player* RobotPlayer::getTarget() const {
@@ -524,6 +520,17 @@ void RobotPlayer::findPath(RegionPriorityQueue& queue, BzfRegion* region, BzfReg
 
 // ========== MY CODE BELOW ==========
 
+void RobotPlayer::doUpdate(float dt) {
+  LocalPlayer::doUpdate(dt);
+
+  aicore::DecisionTreeNode *node = aicore::DecisionTrees::shootDecisions[0].makeDecision(this, dt);
+  (this->*(((aicore::ActionPtr*)node)->actFuncPtr))(dt);
+
+  node = aicore::DecisionTrees::dropFlagDecisions[0].makeDecision(this, dt);
+  (this->*(((aicore::ActionPtr*)node)->actFuncPtr))(dt);
+}
+
+
 void RobotPlayer::doUpdateMotion(float dt) {
 
 #ifdef SKIP_LOOPS
@@ -532,162 +539,20 @@ void RobotPlayer::doUpdateMotion(float dt) {
   }
 #endif
 
-// TESTING <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-//  Player *p = LocalPlayer::getMyTank();
-//  MyNode mooNode(p->getPosition());
-//  if (mooNode.x != 0 && mooNode.y != 0) {
-//    char buffer[128];
-//    sprintf(buffer, "driver: %d, %d", mooNode.x, mooNode.y);
-//    controlPanel->addMessage(buffer);
-//  }
+  aicore::DecisionTreeNode *node = aicore::DecisionTrees::doUpdateMotionDecisions[0].makeDecision(this, dt);
+  (this->*(((aicore::ActionPtr*)node)->actFuncPtr))(dt);
 
-  if (isAlive()) {
-    bool evading = false;
-    // record previous position
-    const float* oldPosition = getPosition();
-    float position[3];
-    position[0] = oldPosition[0];
-    position[1] = oldPosition[1];
-    position[2] = oldPosition[2];
-    const float oldAzimuth = getAngle();
-    float azimuth = oldAzimuth;
-    float tankAngVel = BZDB.eval(StateDatabase::BZDB_TANKANGVEL);
-    float tankSpeed = BZDBCache::tankSpeed;
-    float tankRadius = BZDBCache::tankRadius;
-
-    // basically a clone of Roger's evasive code
-    for (int t = 0; t <= World::getWorld()->getCurMaxPlayers(); t++) {
-      Player *p = 0;
-      if (t < World::getWorld()->getCurMaxPlayers())
-        p = World::getWorld()->getPlayer(t);
-      else
-        p = LocalPlayer::getMyTank();
-      if (!p || p->getId() == getId())
-        continue;
-      const int maxShots = p->getMaxShots();
-      for (int s = 0; s < maxShots; s++) {
-        ShotPath* shot = p->getShot(s);
-        if (!shot || shot->isExpired())
-          continue;
-        // ignore invisible bullets completely for now (even when visible)
-        if (shot->getFlag() == Flags::InvisibleBullet)
-          continue;
-
-        const float* shotPos = shot->getPosition();
-        if ((fabs(shotPos[2] - position[2]) > BZDBCache::tankHeight)
-            && (shot->getFlag() != Flags::GuidedMissile))
-          continue;
-        const float dist = TargetingUtils::getTargetDistance(position, shotPos);
-        if (dist < 150.0f) {
-          const float *shotVel = shot->getVelocity();
-          float shotAngle = atan2f(shotVel[1], shotVel[0]);
-          float shotUnitVec[2] = { cosf(shotAngle), sinf(shotAngle) };
-
-          float trueVec[2] =
-              { (position[0] - shotPos[0]) / dist, (position[1] - shotPos[1]) / dist };
-          float dotProd = trueVec[0] * shotUnitVec[0] + trueVec[1] * shotUnitVec[1];
-
-          if (dotProd > 0.97f) {
-            float rotation;
-            float rotation1 = (float) ((shotAngle + M_PI / 2.0) - azimuth);
-            if (rotation1 < -1.0f * M_PI)
-              rotation1 += (float) (2.0 * M_PI);
-            if (rotation1 > 1.0f * M_PI)
-              rotation1 -= (float) (2.0 * M_PI);
-
-            float rotation2 = (float) ((shotAngle - M_PI / 2.0) - azimuth);
-            if (rotation2 < -1.0f * M_PI)
-              rotation2 += (float) (2.0 * M_PI);
-            if (rotation2 > 1.0f * M_PI)
-              rotation2 -= (float) (2.0 * M_PI);
-
-            if (fabs(rotation1) < fabs(rotation2))
-              rotation = rotation1;
-            else
-              rotation = rotation2;
-            setDesiredSpeed(1.0f);
-            setDesiredAngVel(rotation);
-            evading = true;
-          }
-        }
-      }  // for s
-    }  // for t
-
-    // when we are not evading, follow the path
-    if (!evading && dt > 0.0 && pathIndex < (int) path.size()) {
-
-      this->checkLineOfSight();
-
-      // find how long it will take to get to next path segment
-      const float* nextPoint = path[pathIndex].get();
-      float relPosToNextNode[2] = {nextPoint[0] - position[0], nextPoint[1] - position[1]};
-      float distanceToNextNode = hypotf(relPosToNextNode[0], relPosToNextNode[1]);
-      // smooth path a little by turning early at corners, might get us stuck, though
-      //if (distance <= 2.5f * tankRadius)
-      if (distanceToNextNode <= dt * tankSpeed + tankRadius) {
-          pathIndex++;
-      }
-
-      float separationV[3] = {0};
-      this->getSeparation(separationV);
-
-      //float distance;
-      // v is a relative position, according to the original implementation
-      float v[2];
-      v[0] = PATH_WEIGHT * relPosToNextNode[0] + SEPARATION_WEIGHT * separationV[0];
-      v[1] = PATH_WEIGHT * relPosToNextNode[1] + SEPARATION_WEIGHT * separationV[1];
-      // normalize v
-      // QUESTION: is there a point to normalizing v?
-      int weight = PATH_WEIGHT + SEPARATION_WEIGHT;
-      v[0] /= weight;
-      v[1] /= weight;
-
-      float segmentAzimuth = atan2f(v[1], v[0]);
-      float azimuthDiff = segmentAzimuth - azimuth;
-      if (azimuthDiff > M_PI)
-        azimuthDiff -= (float) (2.0 * M_PI);
-      else if (azimuthDiff < -M_PI)
-        azimuthDiff += (float) (2.0 * M_PI);
-      if (fabs(azimuthDiff) > 0.01f) {
-        // drive backward when target is behind, try to stick to last direction
-        if (drivingForward)
-          drivingForward = fabs(azimuthDiff) < M_PI / 2 * 0.9 ? true : false;
-        else
-          drivingForward = fabs(azimuthDiff) < M_PI / 2 * 0.3 ? true : false;
-        setDesiredSpeed(drivingForward ? 1.0f : -1.0f);
-        // set desired turn speed
-        if (azimuthDiff >= dt * tankAngVel) {
-          setDesiredAngVel(1.0f);
-        }
-        else if (azimuthDiff <= -dt * tankAngVel) {
-          setDesiredAngVel(-1.0f);
-        }
-        else {
-          setDesiredAngVel(azimuthDiff / dt / tankAngVel);
-        }
-      }
-      else {
-        drivingForward = true;
-// QUESTION: do I need this?
-//        setDesiredSpeed(1.0f);
-        // tank doesn't turn while moving forward
-        setDesiredAngVel(0.0f);
-      }
-// TESTING ---------------------------------------------------------------------
-//setDesiredSpeed(0.0f);
-//setDesiredAngVel(0.0f);
-    } // if (!evading...)
-    // to prevent overshooting the target
-    else if (!evading && dt > 0.0 && pathIndex >= (int) path.size()) {
-      pathIndex = (int) (path.size() - 1);
-    }
-  } // if (isAlive())
   LocalPlayer::doUpdateMotion(dt);
 }
 
 
 void RobotPlayer::setTarget(const Player* _target) {
   target = _target;
+  // _target only includes robots
+  // allow robots to shoot the player also
+  if (!target) {
+    target = LocalPlayer::getMyTank();
+  }
 
 #ifdef SKIP_LOOPS
   if (RobotPlayer::loops < SKIP_LOOPS) {
@@ -707,7 +572,7 @@ void RobotPlayer::setTarget(const Player* _target) {
     MyNode startNode = this->getTeamStartNode();
     this->setPath(teamPaths[myTeam], startNode, teamGoal[myTeam]);
   }
-
+/*
   // if tank doesn't have a path yet, or
   // if tank's path doesn't lead to team goal (maybe team goal changed)
   if (path.empty() || !(myGoal == teamGoal[myTeam])) {
@@ -721,6 +586,33 @@ void RobotPlayer::setTarget(const Player* _target) {
     }
     myGoal = teamGoal[myTeam];
   }
+*/
+
+  // if tank's goal isn't the same as the team goal
+  // (this would be true initially when the tank doesn't have a path yet)
+  // (or maybe the team goal changed)
+  if (!(myGoal == teamGoal[myTeam])) {
+    path.clear();
+    pathIndex = 0;
+    // copy the team path into tank's path, and set tank's goal to be team goal
+    for (int i=0; i<teamPaths[myTeam].size(); i++) {
+      MyNode node = teamPaths[myTeam][i];
+      RegionPoint rp(convertToGameCoord(node.x), convertToGameCoord(node.y));
+      path.push_back(rp);
+    }
+    myGoal = teamGoal[myTeam];
+  }
+
+  // tank's goal is the same as the team goal, but the tank doesn't have a path
+  // this should only be true if the tank exploded
+  // set the path as the goal node, and let the tank find it's own path there
+  // when it calls checkLineOfSight()
+  if (path.empty()) {
+    MyNode node = myGoal;
+    RegionPoint rp(convertToGameCoord(node.x), convertToGameCoord(node.y));
+    path.push_back(rp);
+  }
+
 }
 
 
@@ -767,7 +659,6 @@ MyNode RobotPlayer::getTeamStartNode() {
 }
 
 
-
 /* Uses A* search to find a path from the start node to the goal node.  ALSO smooths the path.
  * WARNING: will crash if the goal (or start?) node is inaccessible.
  * @param myPath Writes the path to this vector of nodes.
@@ -776,11 +667,8 @@ MyNode RobotPlayer::getTeamStartNode() {
  */
 void RobotPlayer::setPath(std::vector<MyNode> &myPath, MyNode start, MyNode goal) {
   // set up the graph function container
-  int xmin = (int)(-0.5f * BZDBCache::worldSize);
-  int ymin = (int)(-0.5f * BZDBCache::worldSize);
-  int xmax = (int)(0.5f * BZDBCache::worldSize);
-  int ymax = (int)(0.5f * BZDBCache::worldSize);
-  GraphFunctionContainer container(xmin, ymin, xmax, ymax);
+  int halfWorldSize = (int)(0.5f * BZDBCache::worldSize);
+  GraphFunctionContainer container(halfWorldSize);
 
   // create the graph
   GenericSearchGraphDescriptor<MyNode, double> graph;
@@ -838,25 +726,6 @@ std::vector<MyNode> RobotPlayer::getSmoothPath(std::vector<MyNode> inputPath) {
 }
 
 
-
-/* Checks the line of sight between the given positions to see if any obstacles are in the way.
- * @param fromPos2D The position that we are checking the line-of-sight from.
- * @param toPos2D The position that we are looking toward.
- * @return True if the line of sight is obstructed, false otherwise
- */
-bool RobotPlayer::obstructedLineOfSight(const float *fromPos2D, const float *toPos2D) {
-  float fromPos[3] = {fromPos2D[0], fromPos2D[1], 0.0f};
-  float toPos[3]   = {toPos2D[0],   toPos2D[1],   0.0f};
-
-  float dist = hypotf(toPos[0]-fromPos[0], toPos[1]-fromPos[1]);
-  float direction[3] = {(toPos[0]-fromPos[0])/dist, (toPos[1]-fromPos[1])/dist, 0.0f};
-  Ray myRay(fromPos, direction);
-
-  return (ShotStrategy::getFirstBuilding(myRay, 0.0f, dist) != NULL);
-}
-
-
-
 /* If the line of sight from the tank's current position to the next node is blocked,
  * then use A* search to find a path to the next node, and insert it into the tank's path
  */
@@ -883,6 +752,23 @@ void RobotPlayer::checkLineOfSight() {
       }
     }  // if prePath.size > 2
   }  // if obstructedLineOfSight
+}
+
+
+/* Checks the line of sight between the given positions to see if any obstacles are in the way.
+ * @param fromPos2D The position that we are checking the line-of-sight from.
+ * @param toPos2D The position that we are looking toward.
+ * @return True if the line of sight is obstructed, false otherwise
+ */
+bool RobotPlayer::obstructedLineOfSight(const float *fromPos2D, const float *toPos2D) {
+  float fromPos[3] = {fromPos2D[0], fromPos2D[1], 0.0f};
+  float toPos[3]   = {toPos2D[0],   toPos2D[1],   0.0f};
+
+  float dist = hypotf(toPos[0]-fromPos[0], toPos[1]-fromPos[1]);
+  float direction[3] = {(toPos[0]-fromPos[0])/dist, (toPos[1]-fromPos[1])/dist, 0.0f};
+  Ray myRay(fromPos, direction);
+
+  return (ShotStrategy::getFirstBuilding(myRay, 0.0f, dist) != NULL);
 }
 
 
@@ -921,28 +807,6 @@ void RobotPlayer::getCenterOfMass(float centerOfMass[3]) {
 }
 
 
-
-
-/* Identifies all enemy flags, and stores them into a vector.
- * @return A vector containing the enemy flags.
- */
-std::vector<Flag> RobotPlayer::getAllEnemyFlags() {
-  std::vector<Flag> enemyFlags;
-  World *world = World::getWorld();
-  // team flags exist (capture the flag mode)
-  if (world->allowTeamFlags()) {
-    for (int i=0; i<world->getMaxFlags(); i++) {
-      Flag flag = world->getFlag(i);
-      TeamColor flagTeam = flag.type->flagTeam;
-      // if the flag is on some team, but not on our team
-      if (flagTeam != NoTeam && flagTeam != this->getTeam())
-        enemyFlags.push_back(flag);
-    } // for
-  }
-  return enemyFlags;
-}
-
-
 /* Checks if this tank's team has an enemy flag.
  * @return True if this tanks's team has an enemy flag, false otherwise.
  */
@@ -966,19 +830,23 @@ bool RobotPlayer::teamHasEnemyFlag() {
 }
 
 
-/* If able, drops any flag that is not an enemy flag.
+/* Identifies all enemy flags, and stores them into a vector.
+ * @return A vector containing the enemy flags.
  */
-void RobotPlayer::dropFlag() {
+std::vector<Flag> RobotPlayer::getAllEnemyFlags() {
+  std::vector<Flag> enemyFlags;
   World *world = World::getWorld();
-
-  FlagType *myFlag = this->getFlag();
-  if (myFlag &&
-      (myFlag != Flags::Null) &&
-      (myFlag->flagTeam == this->getTeam() || myFlag->flagTeam == NoTeam) &&
-      myFlag->endurance != FlagSticky
-      ) {
-    serverLink->sendDropFlag(this->getId(), this->getPosition());
+  // team flags exist (capture the flag mode)
+  if (world->allowTeamFlags()) {
+    for (int i=0; i<world->getMaxFlags(); i++) {
+      Flag flag = world->getFlag(i);
+      TeamColor flagTeam = flag.type->flagTeam;
+      // if the flag is on some team, but not on our team
+      if (flagTeam != NoTeam && flagTeam != this->getTeam())
+        enemyFlags.push_back(flag);
+    } // for
   }
+  return enemyFlags;
 }
 
 
@@ -1029,6 +897,286 @@ void RobotPlayer::getSeparation(float separationV[3]) {
     //separationV[1] = (relativePosNearbyCOM[1] / distanceNearbyCOM) * BZDBCache::tankSpeed;
   }
 }
+
+
+bool RobotPlayer::tankIsAlive(float dt) {
+  return Player::isAlive();
+}
+
+void RobotPlayer::doNothing(float dt) {
+  //controlPanel->addMessage("do nothing");
+}
+
+
+// ---------- doUpdateMotion ----------
+
+bool RobotPlayer::shotComing(float dt) {
+  const float* position = this->getPosition();
+  const float  azimuth  = this->getAngle();
+
+  for (int t = 0; t <= World::getWorld()->getCurMaxPlayers(); t++) {
+    Player *p = 0;
+    if (t < World::getWorld()->getCurMaxPlayers())
+      p = World::getWorld()->getPlayer(t);
+    else
+      p = LocalPlayer::getMyTank();
+    if (!p || p->getId() == getId())
+      continue;
+    const int maxShots = p->getMaxShots();
+    for (int s = 0; s < maxShots; s++) {
+      ShotPath* shot = p->getShot(s);
+      if (!shot || shot->isExpired())
+        continue;
+      // ignore invisible bullets completely for now (even when visible)
+      if (shot->getFlag() == Flags::InvisibleBullet)
+        continue;
+
+      const float* shotPos = shot->getPosition();
+      if ((fabs(shotPos[2] - position[2]) > BZDBCache::tankHeight)
+          && (shot->getFlag() != Flags::GuidedMissile))
+        continue;
+      const float dist = TargetingUtils::getTargetDistance(position, shotPos);
+      if (dist < 150.0f) {
+        const float *shotVel = shot->getVelocity();
+        this->incomingShotAngle = atan2f(shotVel[1], shotVel[0]);
+        float shotUnitVec[2] = { cosf(this->incomingShotAngle), sinf(this->incomingShotAngle) };
+
+        float trueVec[2] =
+            { (position[0] - shotPos[0]) / dist, (position[1] - shotPos[1]) / dist };
+        float dotProd = trueVec[0] * shotUnitVec[0] + trueVec[1] * shotUnitVec[1];
+
+        if (dotProd > 0.97f) {
+          return true;
+        }
+      }
+    }  // for s
+  }  // for t
+  return false;
+}
+
+void RobotPlayer::evade(float dt) {
+  const float azimuth = this->getAngle();
+
+  float rotation1 = (float) ((this->incomingShotAngle + M_PI / 2.0) - azimuth);
+  if (rotation1 < -1.0f * M_PI)
+    rotation1 += (float) (2.0 * M_PI);
+  if (rotation1 > 1.0f * M_PI)
+    rotation1 -= (float) (2.0 * M_PI);
+
+  float rotation2 = (float) ((this->incomingShotAngle - M_PI / 2.0) - azimuth);
+  if (rotation2 < -1.0f * M_PI)
+    rotation2 += (float) (2.0 * M_PI);
+  if (rotation2 > 1.0f * M_PI)
+    rotation2 -= (float) (2.0 * M_PI);
+
+  float rotation;
+  if (fabs(rotation1) < fabs(rotation2))
+    rotation = rotation1;
+  else
+    rotation = rotation2;
+  setDesiredSpeed(1.0f);
+  setDesiredAngVel(rotation);
+}
+
+void RobotPlayer::followPath(float dt) {
+  const float tankRadius = BZDBCache::tankRadius;
+  const float tankSpeed  = BZDBCache::tankSpeed;
+  const float tankAngVel = BZDB.eval(StateDatabase::BZDB_TANKANGVEL);
+
+  const float* position = this->getPosition();
+  const float  azimuth  = this->getAngle();
+
+  if (dt > 0.0 && pathIndex < (int) path.size()) {
+
+    this->checkLineOfSight();
+
+    // find how long it will take to get to next path segment
+    const float* nextPoint = path[pathIndex].get();
+    float relPosToNextNode[2] = {nextPoint[0] - position[0], nextPoint[1] - position[1]};
+    float distanceToNextNode = hypotf(relPosToNextNode[0], relPosToNextNode[1]);
+    // smooth path a little by turning early at corners, might get us stuck, though
+    //if (distance <= 2.5f * tankRadius)
+    if (distanceToNextNode <= dt * tankSpeed + tankRadius) {
+        pathIndex++;
+    }
+
+    float separationV[3] = {0};
+    this->getSeparation(separationV);
+
+    // v is a relative position, according to the original implementation
+    float v[2];
+    v[0] = PATH_WEIGHT * relPosToNextNode[0] + SEPARATION_WEIGHT * separationV[0];
+    v[1] = PATH_WEIGHT * relPosToNextNode[1] + SEPARATION_WEIGHT * separationV[1];
+    // normalize v
+// QUESTION: is there a point to normalizing v?
+    int weight = PATH_WEIGHT + SEPARATION_WEIGHT;
+    v[0] /= weight;
+    v[1] /= weight;
+
+    float segmentAzimuth = atan2f(v[1], v[0]);
+    float azimuthDiff = segmentAzimuth - azimuth;
+    if (azimuthDiff > M_PI)
+      azimuthDiff -= (float) (2.0 * M_PI);
+    else if (azimuthDiff < -M_PI)
+      azimuthDiff += (float) (2.0 * M_PI);
+    if (fabs(azimuthDiff) > 0.01f) {
+      // drive backward when target is behind, try to stick to last direction
+      if (drivingForward)
+        drivingForward = fabs(azimuthDiff) < M_PI / 2 * 0.9 ? true : false;
+      else
+        drivingForward = fabs(azimuthDiff) < M_PI / 2 * 0.3 ? true : false;
+      setDesiredSpeed(drivingForward ? 1.0f : -1.0f);
+      // set desired turn speed
+      if (azimuthDiff >= dt * tankAngVel) {
+        setDesiredAngVel(1.0f);
+      }
+      else if (azimuthDiff <= -dt * tankAngVel) {
+        setDesiredAngVel(-1.0f);
+      }
+      else {
+        setDesiredAngVel(azimuthDiff / dt / tankAngVel);
+      }
+    }
+    else {
+      drivingForward = true;
+// TODO: QUESTION: do I need this?
+      //setDesiredSpeed(1.0f);
+      // tank doesn't turn while moving forward
+      setDesiredAngVel(0.0f);
+    }
+  } // if (dt > 0.0 && pathIndex < (int) path.size())
+/*
+  // to prevent overshooting the target
+  else if (dt > 0.0 && pathIndex >= (int) path.size()) {
+    pathIndex = (int) (path.size() - 1);
+  }
+*/
+}
+
+
+// ---------- doUpdate shoot ----------
+
+bool RobotPlayer::readyToFire(float dt) {
+  return (LocalPlayer::getFiringStatus() == LocalPlayer::Ready);
+}
+
+bool RobotPlayer::shotTimerElapsed(float dt) {
+  this->timerForShot -= dt;
+  if (this->timerForShot < 0.0f)
+    this->timerForShot = 0.0f;
+
+  return (this->timerForShot <= 0.0f);
+}
+
+bool RobotPlayer::willBarelyMiss(float dt) {
+  // if there is no target, then there is nothing to shoot
+  if (!this->target) {
+    return false;
+  }
+
+  const float shotRadius = BZDB.eval(StateDatabase::BZDB_SHOTRADIUS);
+
+  float p1[3];
+  getProjectedPosition(this->target, p1);
+  const float* p2 = getPosition();
+  const float azimuth = getAngle();
+
+  float shootingAngle = atan2f(p1[1] - p2[1], p1[0] - p2[0]);
+  if (shootingAngle < 0.0f)
+    shootingAngle += (float) (2.0 * M_PI);
+
+  float azimuthDiff = shootingAngle - azimuth;
+  if (azimuthDiff > M_PI)
+    azimuthDiff -= (float) (2.0 * M_PI);
+  else if (azimuthDiff < -M_PI)
+    azimuthDiff += (float) (2.0 * M_PI);
+
+  this->distanceToTarget =
+      hypotf(p1[0]-p2[0], p1[1]-p2[1]) - BZDB.eval(StateDatabase::BZDB_MUZZLEFRONT) - BZDBCache::tankRadius;
+
+  const float missby = fabs(azimuthDiff) * (this->distanceToTarget - BZDBCache::tankLength);
+
+  return ((missby < 0.5f * BZDBCache::tankLength) && (p1[2] < shotRadius));
+}
+
+bool RobotPlayer::buildingInTheWay(float dt) {
+  const float azimuth = this->getAngle();
+
+  float pos[3] = { getPosition()[0], getPosition()[1],
+      getPosition()[2] + BZDB.eval(StateDatabase::BZDB_MUZZLEHEIGHT) };
+  float dir[3] = { cosf(azimuth), sinf(azimuth), 0.0f };
+
+  Ray tankRay(pos, dir);
+  float maxdistance = this->distanceToTarget;
+
+  return (ShotStrategy::getFirstBuilding(tankRay, -0.5f, maxdistance) != NULL);
+}
+
+bool RobotPlayer::teammateInTheWay(float dt) {
+  const float shotRange = BZDB.eval(StateDatabase::BZDB_SHOTRANGE);
+
+  const float azimuth = getAngle();
+  float dir[3] = { cosf(azimuth), sinf(azimuth), 0.0f };
+
+  for (int i = 0; i <= World::getWorld()->getCurMaxPlayers(); i++) {
+    Player *p = 0;
+    if (i < World::getWorld()->getCurMaxPlayers())
+      p = World::getWorld()->getPlayer(i);
+    else
+      p = LocalPlayer::getMyTank();
+    if (!p || p->getId() == getId() || validTeamTarget(p) || !p->isAlive())
+      continue;
+    float relpos[3] = { getPosition()[0] - p->getPosition()[0],
+        getPosition()[1] - p->getPosition()[1], getPosition()[2] - p->getPosition()[2] };
+    Ray ray(relpos, dir);
+    float impact = rayAtDistanceFromOrigin(ray, 5 * BZDBCache::tankRadius);
+
+    return (impact > 0 && impact < shotRange);
+  }
+  return false;
+}
+
+void RobotPlayer::postponeShot(float dt) {
+  controlPanel->addMessage("postpone shot");
+  this->timerForShot = 0.1f;
+}
+
+void RobotPlayer::shoot(float dt) {
+  controlPanel->addMessage("shoot!");
+  if (this->fireShot()) {
+    // separate shot by 0.2 - 0.8 sec (experimental value)
+    this->timerForShot = float(bzfrand()) * 0.6f + 0.2f;
+  }
+}
+
+
+// ---------- doUpdate drop flag ----------
+
+bool RobotPlayer::isHoldingFlag(float dt) {
+  FlagType *myFlag = this->getFlag();
+  return (myFlag != NULL);
+}
+
+bool RobotPlayer::flagIsSticky(float dt) {
+  FlagType *myFlag = this->getFlag();
+  return (myFlag->endurance == FlagSticky);
+}
+
+bool RobotPlayer::flagTeamExists(float dt) {
+  FlagType *myFlag = this->getFlag();
+  return (myFlag->flagTeam != NoTeam);
+}
+
+bool RobotPlayer::isMyTeamFlag(float dt) {
+  FlagType *myFlag = this->getFlag();
+  return (myFlag->flagTeam == this->getTeam());
+}
+
+void RobotPlayer::dropFlag(float dt) {
+  controlPanel->addMessage("drop flag");
+  serverLink->sendDropFlag(this->getId(), this->getPosition());
+}
+
 
 /*
 // ========== Assignment 1    ==========

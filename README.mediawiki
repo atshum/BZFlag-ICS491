@@ -3,8 +3,8 @@ University of Hawaii at Manoa, Fall 2011<br>
 ----
 
 
-=== Assignment 4 ===
-Robot tanks on the same team all use the same team path.  The team path is found using A-star search from the team's center of mass (or a nearby accessible node) to an enemy flag or the team's home base.  The team path is not recalculated unless the destination changes.  Each robot tank will check the line-of-sight to the next node in the path and, if necessary, use A-star search to find a personal path to the next node.  Path-smoothing is performed to reduce the jaggedness of the paths, which arises since the game level is represented as a tile graph.  Blends in a separation so that robot tanks don't end up superimposed on one another.
+=== Assignment 5 ===
+Robot tanks on the same team all use the same team path.  The team path is found using A-star search from the team's center of mass (or a nearby accessible node) to an enemy flag or the team's home base.  The team path is not recalculated unless the destination changes.  Each robot tank will check the line-of-sight to the next node in the path and, if necessary, use A-star search to find a personal path to the next node.  Robot tanks that exploded will use A-star search to find their own path to the goal, rather than starting over with the team path.  Path-smoothing is performed to reduce the jaggedness of the paths, which arises since the game level is represented as a tile graph.  Blends in a separation so that robot tanks don't end up superimposed on one another.
 
 Uses the [http://code.google.com/p/yagsbpl/ YAGSBPL] library to implement A-star search.
 

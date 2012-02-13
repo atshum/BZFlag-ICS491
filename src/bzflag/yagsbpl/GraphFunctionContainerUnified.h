@@ -25,7 +25,6 @@
 
 #include "playing.h"
 
-#define WORLD_SIZE (BZDBCache::worldSize)
 #define SCALE (0.5f * BZDBCache::tankRadius)
 #define ACCESSIBILITY_THRESHOLD (0.5f * BZDBCache::tankRadius)
 #define INVALID -9999
@@ -89,8 +88,8 @@ public:
    */
   static bool isAccessible(int x, int y) {
     float gamePos[3] = {convertToGameCoord(x), convertToGameCoord(y), 0.0f};
-    int posBound = convertToGameCoord( ((int)( 0.5f * BZDBCache::worldSize)) );
-    int negBound = convertToGameCoord( ((int)(-0.5f * BZDBCache::worldSize)) );
+    int posBound = convertToGraphCoord( ((int)( 0.5f * BZDBCache::worldSize)) );
+    int negBound = convertToGraphCoord( ((int)(-0.5f * BZDBCache::worldSize)) );
 
     if (x < negBound || y < negBound || x > posBound || y > posBound)
       return false;
@@ -138,16 +137,13 @@ public:
 class GraphFunctionContainer : public SearchGraphDescriptorFunctionContainer<MyNode, double> {
 public:
   /* Constructor
-   * @param _xmin The minimum x-coordinates of the game level.
-   * @param _ymin The minimum y-coordinates of the game level.
-   * @param _xmax The maximum x-coordinates of the game level.
-   * @param _ymax The maximum y-coordinates of the game level.
+   * @param halfWorldSize Half of the total width or length of the game level.
    */
-  GraphFunctionContainer(int _xmin, int _ymin, int _xmax, int _ymax) {
-    xmin = _xmin;
-    ymin = _ymin;
-    xmax = _xmax;
-    ymax = _ymax;
+  GraphFunctionContainer(int halfWorldSize) {
+    xmin = -1 * halfWorldSize;
+    ymin = -1 * halfWorldSize;
+    xmax = halfWorldSize;
+    ymax = halfWorldSize;
   }
 
   /* Maps nodes to bins in the hash table.
@@ -188,10 +184,10 @@ public:
         }
 
         float gamePos[3] = {convertToGameCoord(n.x + i), convertToGameCoord(n.y + j), 0.0f};
-        if (gamePos[0] < xmin || gamePos[1] < ymin || gamePos[0] > xmax || gamePos[1] > ymax ||
-            World::getWorld()->inBuilding(gamePos, ACCESSIBILITY_THRESHOLD, BZDBCache::tankHeight)) {
+        if (gamePos[0] < xmin || gamePos[1] < ymin || gamePos[0] > xmax || gamePos[1] > ymax)
           continue;
-        }
+        if (World::getWorld()->inBuilding(gamePos, ACCESSIBILITY_THRESHOLD, BZDBCache::tankHeight))
+          continue;
 
         connectedNode.x = n.x + i;
         connectedNode.y = n.y + j;

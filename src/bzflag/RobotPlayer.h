@@ -47,6 +47,150 @@ public:
   void restart(const float* pos, float azimuth);
   void explodeTank();
 
+// ========== MY CODE (begin) ==========
+
+  /* Indicates whether or not the tank is alive.
+   * @param dt The time since the last frame.
+   * @return True if the tank is alive, false otherwise.
+   */
+  bool tankIsAlive(float dt);
+
+  /* Does nothing.  Needed because the ActionPtrs need a function to point to.
+   * @param dt The time since the last frame.
+   */
+  void doNothing(float dt);
+
+
+// ---------- doUpdateMotion ----------
+  /* Indicates whether or not a shot is coming near the tank.
+   * @param dt The time since the last frame.
+   * @return True if a shot is coming near the tank, false otherwise.
+   */
+  bool shotComing(float dt);
+
+  /* Turn and move away from the incoming shot.
+   * @param dt The time since the last frame.
+   */
+  void evade(float dt);
+
+  /* Follow the tank's path toward the team goal.
+   * @param dt The time since the last frame.
+   */
+  void followPath(float dt);
+
+
+// ---------- doUpdate, shoot ----------
+  /* Indicates whether or not the tank's firing status is ready.
+   * @param dt The time since the last frame.
+   * @return True if the tank's firing status is ready, false otherwise.
+   */
+  bool readyToFire(float dt);
+
+  /* Indicates whether or not the tank's timer for shooting has elapsed.
+   * @param dt The time since the last frame.
+   * @return True if the tank's timer for shooting has elapsed, false otherwise.
+   */
+  bool shotTimerElapsed(float dt);
+
+  /* Indicates whether or not the predicted shot will miss by less than half a tank length.
+   * @param dt The time since the last frame.
+   * @return True if the predicted shot will miss by less than half a tank length, false otherwise.
+   */
+  bool willBarelyMiss(float dt);
+
+  /* Indicates whether or not there is a building between the tank and the shooting target.
+   * @param dt The time since the last frame.
+   * @return True if there is a building between the tank and the shooting target, false otherwise.
+   */
+  bool buildingInTheWay(float dt);
+
+  /* Indicates whether or not there is a teammate between the tank and the shooting target.
+   * @param dt The time since the last frame.
+   * @return True if there is a teammate between the tank and the shooting target, false otherwise.
+   */
+  bool teammateInTheWay(float dt);
+
+  /* Postpone shooting for now.
+   * @param dt The time since the last frame.
+   */
+  void postponeShot(float dt);
+
+  /* Shoot, and reset the timer for the next shot to a random amount.
+   * @param dt The time since the last frame.
+   */
+  void shoot(float dt);
+
+
+// ---------- doUpdate, drop flag ----------
+  /* Indicates whether or not the tank is holding a flag.
+   * @param dt The time since the last frame.
+   * @return True if the tank is holding a flag, false otherwise.
+   */
+  bool isHoldingFlag(float dt);
+
+  /* Indicates whether or not the flag can be dropped.
+   * @param dt The time since the last frame.
+   * @return True if the flag can be dropped, false otherwise.
+   */
+  bool flagIsSticky(float dt);
+
+  /* Indicates whether or not the flag belongs to some team
+   * @param dt The time since the last frame.
+   * @return True if the flag belongs to some team, false otherwise.
+   */
+  bool flagTeamExists(float dt);
+
+  /* Indicates whether or not the flag is the tank's team flag.
+   * @param dt The time since the last frame.
+   * @return True if the flag is the tank's team flag, false otherwise.
+   */
+  bool isMyTeamFlag(float dt);
+
+  /* Drops the flag at the tank's present location.
+   * @param dt The time since the last frame.
+   */
+  void dropFlag(float dt);
+
+
+private:
+  // the angle that the incoming shot is traveling in
+  float incomingShotAngle;
+
+  // the distance from the tank to the shooting target
+  float distanceToTarget;
+
+
+// ---------- path stuff ----------
+  // stores the goal that each team wants to reach
+  static MyNode teamGoal[CtfTeams];
+
+  // stores each team's A* path to the team goal
+  static std::vector<MyNode> teamPaths[CtfTeams];
+
+  // the tank's goal, to be compared with the team goal
+  MyNode myGoal;
+
+  void setTeamGoalNode();
+  MyNode getTeamStartNode();
+  void setPath(std::vector<MyNode> &myPath, MyNode start, MyNode goal);
+  std::vector<MyNode> getSmoothPath(std::vector<MyNode> inputPath);
+
+  void checkLineOfSight();
+  bool obstructedLineOfSight(const float *fromPos, const float *toPos);
+
+  void getCenterOfMass(float centerOfMass[2]);
+
+  bool teamHasEnemyFlag();
+  std::vector<Flag> getAllEnemyFlags();
+
+  void getSeparation(float v[3]);
+
+  // used to do nothing for the first few run loops of the game
+  static int loops;
+
+// ========== MY CODE (end) ==========
+
+
 private:
   void doUpdate(float dt);
   void doUpdateMotion(float dt);
@@ -57,36 +201,6 @@ private:
       const float targetPoint[2], int mailbox);
   void projectPosition(const Player *targ, const float t, float &x, float &y, float &z) const;
   void getProjectedPosition(const Player *targ, float *projpos) const;
-
-// ========== MY CODE (begin) ==========
-  static int loops;
-
-  static std::vector<MyNode> teamPaths[CtfTeams];
-  static MyNode teamGoal[CtfTeams];
-  MyNode myGoal;
-
-  void setTeamGoalNode();
-  MyNode getTeamStartNode();
-
-  void setPath(std::vector<MyNode> &myPath, MyNode start, MyNode goal);
-  std::vector<MyNode> getSmoothPath(std::vector<MyNode> inputPath);
-
-  bool obstructedLineOfSight(const float *fromPos, const float *toPos);
-  void checkLineOfSight();
-
-  void getCenterOfMass(float centerOfMass[2]);
-  void checkCenterOfMass(float centerOfMass[2]);
-
-  bool teamHasEnemyFlag();
-  std::vector<Flag> getAllEnemyFlags();
-  void dropFlag();
-
-  void getSeparation(float v[3]);
-
-
-// ========== MY CODE (end) ==========
-
-
 
 private:
   const Player* target;

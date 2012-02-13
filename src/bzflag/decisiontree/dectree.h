@@ -25,102 +25,100 @@
 
 #define NULL 0
 
-namespace aicore
-{
+namespace aicore {
+
+  /**
+   * A decision tree node is a base class for anything that makes a
+   * decision.
+   */
+  class DecisionTreeNode {
+  public:
+    /**
+     * The make decision method carries out a decision making
+     * process and returns the new decision tree node that we've
+     * reached in the tree.
+     */
+    virtual DecisionTreeNode* makeDecision(RobotPlayer* bot, float dt) = 0;
+  };
+
+  /**
+   * An action is a decision tree node at the end of the tree. It
+   * simply returns itself as the result of the next decision.
+   */
+  class DecisionTreeAction : public DecisionTreeNode {
+  public:
+    /**
+     * Makes the decision - in  this case there is no decision, so
+     * this method returns the action back again..
+     */
+    virtual DecisionTreeNode* makeDecision(RobotPlayer* bot, float dt) {
+        return this;
+    }
+  };
+
+  /**
+   * Other than actions, the tree is made up of decisions, which
+   * come up with some boolean result and choose a branch based on
+   * that.
+   */
+  class Decision : public DecisionTreeNode {
+  public:
+    DecisionTreeNode* trueBranch;
+    DecisionTreeNode* falseBranch;
 
     /**
-     * A decision tree node is a base class for anything that makes a
-     * decision.
+     * This method actually does the checking for the decision.
      */
-    class DecisionTreeNode
-    {
-    public:
-        /**
-         * The make decision method carries out a decision making
-         * process and returns the new decision tree node that we've
-         * reached in the tree.
-         */
-        virtual DecisionTreeNode* makeDecision(RobotPlayer* bot, float dt) = 0;
-    };
+    virtual bool getBranch(RobotPlayer* bot, float dt) = 0;
 
     /**
-     * An action is a decision tree node at the end of the tree. It
-     * simply returns itself as the result of the next decision.
+     * This is where the decision tree algorithm is located: it
+     * recursively walks down the tree until it reaches the final
+     * item to return (which is an action).
      */
-    class DecisionTreeAction : public DecisionTreeNode
-    {
-    public:
-        /**
-         * Makes the decision - in  this case there is no decision, so
-         * this method returns the action back again..
-         */
-        virtual DecisionTreeNode* makeDecision(RobotPlayer* bot, float dt)
-        {
-            return this;
-        }
-    };
+    virtual DecisionTreeNode* makeDecision(RobotPlayer* bot, float dt);
+  };
 
-    /**
-     * Other than actions, the tree is made up of decisions, which
-     * come up with some boolean result and choose a branch based on
-     * that.
-     */
-    class Decision : public DecisionTreeNode
-    {
-    public:
-        DecisionTreeNode* trueBranch;
-        DecisionTreeNode* falseBranch;
-
-        /**
-         * This method actually does the checking for the decision.
-         */
-        virtual bool getBranch(RobotPlayer* bot, float dt) = 0;
-
-        /**
-         * This is where the decision tree algorithm is located: it
-         * recursively walks down the tree until it reaches the final
-         * item to return (which is an action).
-         */
-        virtual DecisionTreeNode* makeDecision(RobotPlayer* bot, float dt);
-    };
-
-    /**
-     * This class represents a decision given by the function pointer,
-	 * ptr
-     */
-	class DecisionPtr : public aicore::Decision
-	{
+  /*
+   * This class represents a decision given by the function pointer, ptr
+   */
+	class DecisionPtr : public aicore::Decision {
 	public:
-		/**
-		* This will hold the function pointer
-		*/
+    /*
+     * This will hold the function pointer
+     */
 		bool (RobotPlayer::*decFuncPtr)(float dt);
 
-        virtual DecisionTreeNode* makeDecision(RobotPlayer* bot, float dt);
+    virtual DecisionTreeNode* makeDecision(RobotPlayer* bot, float dt);
 		virtual bool getBranch(RobotPlayer* bot, float dt);
 	};
 
-	/**
-	* This is a very simple action that just holds a function pointer
-	* to the actual action to run.
-	*/
-	class ActionPtr : public aicore::DecisionTreeAction
-	{
+	/*
+	 * This is a very simple action that just holds a function pointer
+	 * to the actual action to run.
+	 */
+	class ActionPtr : public aicore::DecisionTreeAction {
 	public:
-		/**
-		* This will hold the function pointer
-		*/
+		/*
+		 * This will hold the function pointer
+		 */
 		void (RobotPlayer::*actFuncPtr)(float dt);
 	};
 
-	class DecisionTrees
-	{
+	class DecisionTrees {
 	public:
 		static void init();
 		// Holds our list of decisions
-		static DecisionPtr doUpdateMotionDecisions[7];
+		static DecisionPtr doUpdateMotionDecisions[2];
 		// Holds our list of actions
-		static ActionPtr doUpdateMotionActions[5];
+		static ActionPtr doUpdateMotionActions[3];
+
+		static DecisionPtr shootDecisions[6];
+		static ActionPtr   shootActions[3];
+
+		static DecisionPtr dropFlagDecisions[5];
+		static ActionPtr   dropFlagActions[2];
+
 	};
 
 }; // end of namespace
