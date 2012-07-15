@@ -113,7 +113,8 @@ public:
     while (k <= radius) {
       for (int i=-k; i<=k; i++) {
         for (int j=-k; j<=k; j++) {
-          if (i == 0 & j == 0) continue;
+          if (i == 0 && j == 0) continue;
+          if (i >= -k+1 && i <= k-1 && j >= -k+1 && j <= k-1) continue;
           x += i;
           y += j;
           if (MyNode::isAccessible(x, y)) {

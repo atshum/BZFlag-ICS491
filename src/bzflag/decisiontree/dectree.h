@@ -108,17 +108,18 @@ namespace aicore {
 	class DecisionTrees {
 	public:
 		static void init();
-		// Holds our list of decisions
-		static DecisionPtr doUpdateMotionDecisions[2];
-		// Holds our list of actions
-		static ActionPtr doUpdateMotionActions[3];
+
+		static DecisionPtr assignRoleDecisions[2];
+    static ActionPtr   assignRoleActions[3];
+
+		static DecisionPtr doUpdateMotionDecisions[5];
+		static ActionPtr   doUpdateMotionActions[4];
 
 		static DecisionPtr shootDecisions[6];
 		static ActionPtr   shootActions[3];
 
 		static DecisionPtr dropFlagDecisions[5];
 		static ActionPtr   dropFlagActions[2];
-
 	};
 
 }; // end of namespace
