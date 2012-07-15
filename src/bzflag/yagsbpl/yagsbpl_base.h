@@ -135,14 +135,14 @@ class SearchGraphDescriptorFunctionContainer
 {
 public:
 	bool func_redefined;
-	virtual int getHashBin(NodeType& n) { func_redefined = false; };
-	virtual bool isAccessible(NodeType& n) { func_redefined = false; };
+	virtual int getHashBin(NodeType& n) { func_redefined = false; return 0; };
+	virtual bool isAccessible(NodeType& n) { return func_redefined = false; };
 	virtual void getSuccessors(NodeType& n, std::vector<NodeType>* s, std::vector<CostType>* c) { func_redefined = false; };
 	virtual void getPredecessors(NodeType& n, std::vector<NodeType>* s, std::vector<CostType>* c)
 													{ func_redefined = false; };
-	virtual CostType getHeuristics(NodeType& n1, NodeType& n2) { func_redefined = false; };
-	virtual bool storePath(NodeType& n) { func_redefined = false; };
-	virtual bool stopSearch(NodeType& n) { func_redefined = false; };
+	virtual CostType getHeuristics(NodeType& n1, NodeType& n2) { func_redefined = false; return 0;};
+	virtual bool storePath(NodeType& n) { return func_redefined = false; };
+	virtual bool stopSearch(NodeType& n) { return func_redefined = false; };
 };
 
 template <class NodeType, class CostType, class ContainerClass>

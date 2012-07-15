@@ -2,15 +2,31 @@ ICS 491 - Special Topics: Artificial Intelligence for Games<br>
 University of Hawaii at Manoa, Fall 2011<br>
 ----
 
+=== Assignment 6 ===
+Assigns different roles to the tanks.
 
-=== Assignment 5 ===
-Robot tanks on the same team all use the same team path.  The team path is found using A-star search from the team's center of mass (or a nearby accessible node) to an enemy flag or the team's home base.  The team path is not recalculated unless the destination changes.  Each robot tank will check the line-of-sight to the next node in the path and, if necessary, use A-star search to find a personal path to the next node.  Robot tanks that exploded will use A-star search to find their own path to the goal, rather than starting over with the team path.  Path-smoothing is performed to reduce the jaggedness of the paths, which arises since the game level is represented as a tile graph.  Blends in a separation so that robot tanks don't end up superimposed on one another.
+One tank guards the team flag.  If it doesn't have the flag,
+it finds a path to the flag and moves there.  If it has the flag 
+and it is not at its team base, it returns to base.  If it has
+the flag and is at its team base, it turns to face the nearest enemy.
+
+One tank tries to capture the nearest enemy flag.  If it doesn't have
+an enemy flag, it will find a path to the nearest enemy flag and move there.
+If the nearest enemy flag changes, its path will also change.  If it
+has an enemy flag, it will return to base.
+
+The remaining tanks chase after (and hopefully shoot) enemy tanks.
+Each tank's target is determined by the default targeting code.  
+Each tank can have a different target, so each tank will have its own path.
+
+Tanks that are not guarding the team flag will drop the team flag so the
+guard tank can retrieve it.
+
+Tanks that are not trying to capture enemy flags will hold on to enemy flags,
+to prevent them from being picked up by other teams, but they will make no
+effort to capture the flag.
 
 Uses the [http://code.google.com/p/yagsbpl/ YAGSBPL] library to implement A-star search.
-
-Note:
-If you are not playing as an observer, then during the first few run loops, some of the tanks will be uninitialized(?) and have coordinates (0,0) as their position, which skews the center of mass calculation.  This is why you might see the tanks move toward the center of map before seeking the enemy flag.
-
 
 === Installing ===
 # Download the BZFlag 2.4.0 source (not the installer/binary)
@@ -21,6 +37,6 @@ If you are not playing as an observer, then during the first few run loops, some
 === Running ===
 * <code>$BZFS_BIN</code> - the path to the BZFlag server executable
 * <code>$BZFLAG_BIN</code> - the path to the BZFlag client executable
-# <code>$BZFS_BIN/bzfs -cr</code>
-# <code>$BZFLAG_BIN/bzflag -solo 9</code>
+* <code>$BZFS_BIN/bzfs -cr</code>
+* <code>$BZFLAG_BIN/bzflag -solo 9</code>
 

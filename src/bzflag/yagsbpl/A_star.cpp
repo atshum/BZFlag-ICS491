@@ -59,8 +59,10 @@ void A_star_planner<NodeType,CostType>::init( GenericSearchGraphDescriptor<NodeT
 			
 			if ( !GraphDescriptor->_isAccessible( thisGraphNode->n ) )
 			{
-				printf("ERROR (A_star): At least one of the seed nodes is not accessible!" );
-				exit(1);
+//				printf("ERROR (A_star): At least one of the seed nodes is not accessible!" );
+//				exit(1);
+			  // show error in bzflag
+			  controlPanel->addMessage("ERROR (A_star): At least one of the seed nodes is not accessible!");
 			}
 			else
 				thisGraphNode->plannerVars.accessible = true;
